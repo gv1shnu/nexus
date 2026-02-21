@@ -1,0 +1,13 @@
+duckduckgo
+brave
+wikipedia
+stackoverflow
+qwant
+startpage
+bing
+yahoo
+arxiv
+pubmed
+semantic-scholar
+reddit
+mwmbl

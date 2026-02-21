@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexus Metasearch</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    <link rel="shortcut icon" href="/favicon/favicon.ico">
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <div class="cosmos">
+        <div class="sun"></div>
+        <div class="orbit orbit-1">
+            <div class="star"></div>
+        </div>
+        <div class="orbit orbit-2">
+            <div class="star"></div>
+        </div>
+        <div class="orbit orbit-3">
+            <div class="star"></div>
+        </div>
+        <div class="orbit orbit-4">
+            <div class="star"></div>
+        </div>
+        <div class="orbit orbit-5">
+            <div class="star"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1>Nexus</h1>
+        <p class="tagline">searches the searchers</p>
+
+        <div class="search-bar">
+            <input id="searchInput" placeholder="Search the internet..." />
+            <button id="sortBtn" onclick="toggleSort()" style="display: none;">Date</button>
+            <button id="homeBtn" onclick="goHome()" style="display: none;">Home</button>
+        </div>
+
+        <div id="status"></div>
+        <div id="loader" class="loader hidden"></div>
+
+        <div id="tabs" class="tabs hidden">
+            <button class="tab active" data-tab="all">All</button>
+            <button class="tab" data-tab="web">Web</button>
+            <button class="tab" data-tab="images">Images</button>
+            <button class="tab" data-tab="videos">Videos</button>
+            <button class="tab" data-tab="news">News</button>
+            <button class="tab" data-tab="documents">Docs</button>
+            <button class="tab" data-tab="books">Books</button>
+            <button class="tab" data-tab="code">Code</button>
+            <button class="tab" data-tab="academic">Academic</button>
+            <button class="tab" data-tab="community">Community</button>
+        </div>
+
+        <div id="results"></div>
+        <div id="pagination" class="pagination"></div>
+
+        <footer>
+            <p>the goal is more information, not speed.</p>
+        </footer>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+
+</html>
