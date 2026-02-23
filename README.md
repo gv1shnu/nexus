@@ -32,6 +32,15 @@ cd frontend && npx serve .
 npm test -- --verbose
 ```
 
+## To Add
+
+- Holehe
+- theHarvester
+- Sherlock
+- Shodan
+- Scholarly
+- Google (difficult)
+
 ## Screenshot
 
 ![screenshot](images/screenshot.png)
