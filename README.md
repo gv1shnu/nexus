@@ -1,8 +1,9 @@
 # Nexus
 
 A metasearch engine — Quantity over Speed.
-
 No API keys. No database. No tracking.
+
+Current status: Archived aka abandoned.
 
 ---
 
@@ -40,7 +41,3 @@ npm test -- --verbose
 - Shodan
 - Scholarly
 - Google (difficult)
-
-## Screenshot
-
-![screenshot](images/screenshot.png)
