@@ -39,37 +39,32 @@ function parseXML(xml) {
     return entries;
 }
 
-async function search(query) {
-    let allEntries = [];
-    let start = 0;
-    let keepGoing = true;
-    let loops = 0;
+const PAGE_SIZE = 100;
+const MAX_PAGES = 2; // deeper pages return loosely-related noise; keep it tight
 
-    while (keepGoing && loops < 5) {
+async function search(query) {
+    const fetchPage = async (start) => {
         try {
             const res = await axios.get(ARXIV_API, {
                 params: {
                     search_query: `all:${query}`,
                     start: start,
-                    max_results: 100,
+                    max_results: PAGE_SIZE,
                     sortBy: 'relevance',
                     sortOrder: 'descending'
                 },
                 timeout: 15000
             });
-
-            const parsed = parseXML(res.data);
-            if (parsed.length === 0) {
-                keepGoing = false;
-            } else {
-                allEntries.push(...parsed);
-                start += 100;
-                loops++;
-            }
+            return parseXML(res.data);
         } catch (e) {
-            keepGoing = false;
+            return [];
         }
-    }
+    };
+
+    // Fetch fixed offsets in parallel rather than paging serially.
+    const starts = Array.from({ length: MAX_PAGES }, (_, i) => i * PAGE_SIZE);
+    const pages = await Promise.all(starts.map(fetchPage));
+    const allEntries = pages.flat();
 
     return { academic: allEntries };
 }

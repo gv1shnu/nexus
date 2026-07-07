@@ -1,0 +1,222 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg: #000;
+    --fg: #fff;
+    --muted: rgba(255, 255, 255, 0.5);
+    --dim: rgba(255, 255, 255, 0.35);
+    --card: rgba(255, 255, 255, 0.04);
+    --border: rgba(255, 255, 255, 0.12);
+    --accent: #fff;
+    --bar: rgba(255, 255, 255, 0.85);
+    --bar-track: rgba(255, 255, 255, 0.07);
+}
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    padding: 48px 20px 80px;
+    display: flex;
+    justify-content: center;
+}
+
+.wrap {
+    width: 100%;
+    max-width: 920px;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+header h1 {
+    font-weight: 300;
+    letter-spacing: 0.5em;
+    font-size: 2.2rem;
+    text-indent: 0.5em;
+    text-shadow: 0 0 24px rgba(255, 255, 255, 0.35);
+}
+
+header .sub {
+    color: var(--muted);
+    letter-spacing: 0.25em;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    margin-top: 10px;
+}
+
+header .back {
+    display: inline-block;
+    margin-top: 18px;
+    color: var(--dim);
+    text-decoration: none;
+    font-size: 0.8rem;
+    border: 1px solid var(--border);
+    padding: 6px 16px;
+    border-radius: 999px;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+header .back:hover {
+    color: var(--fg);
+    border-color: var(--fg);
+}
+
+.section-title {
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 36px 0 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+}
+
+/* Headline stat cards */
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+}
+
+.card.hero {
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 40px rgba(255, 255, 255, 0.05) inset;
+}
+
+.card .value {
+    font-size: 2rem;
+    font-weight: 300;
+    line-height: 1.1;
+}
+
+.card .value small {
+    font-size: 0.95rem;
+    color: var(--muted);
+    font-weight: 300;
+}
+
+.card .label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 8px;
+    letter-spacing: 0.03em;
+}
+
+.card .note {
+    color: var(--dim);
+    font-size: 0.68rem;
+    margin-top: 4px;
+}
+
+/* Bars */
+.bars {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+}
+
+.bar-row {
+    display: grid;
+    grid-template-columns: 120px 1fr 110px;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 0;
+}
+
+.bar-row .name {
+    font-size: 0.85rem;
+    color: var(--fg);
+}
+
+.bar-track {
+    background: var(--bar-track);
+    border-radius: 999px;
+    height: 10px;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    background: var(--bar);
+    border-radius: 999px;
+    width: 0;
+    transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.bar-row .meta {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Pipeline funnel */
+.funnel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+}
+
+.funnel-row {
+    display: grid;
+    grid-template-columns: 150px 1fr 90px;
+    align-items: center;
+    gap: 14px;
+}
+
+.funnel-row .name {
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.funnel-bar {
+    height: 22px;
+    background: var(--bar);
+    border-radius: 6px;
+    width: 0;
+    transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+    opacity: 0.9;
+}
+
+.funnel-row .amt {
+    font-size: 0.78rem;
+    color: var(--fg);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.empty, .err {
+    text-align: center;
+    color: var(--muted);
+    padding: 60px 20px;
+    line-height: 1.6;
+}
+
+.err { color: #ff8a8a; }
+
+footer {
+    text-align: center;
+    color: var(--dim);
+    font-size: 0.72rem;
+    margin-top: 44px;
+}

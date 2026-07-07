@@ -5,8 +5,8 @@ const app = require('./server');
 jest.mock('./engines/ddg', () => ({
     search: jest.fn().mockResolvedValue({
         web: [
-            { title: 'DDG Result 1', url: 'https://ddg1.com', content: 'body 1', engine: 'duckduckgo', publishedDate: null },
-            { title: 'DDG Result 2', url: 'https://ddg2.com', content: 'body 2', engine: 'duckduckgo', publishedDate: null }
+            { title: 'DDG Result 1', url: 'https://ddg1.com', content: 'test body 1', engine: 'duckduckgo', publishedDate: null },
+            { title: 'DDG Result 2', url: 'https://ddg2.com', content: 'test body 2', engine: 'duckduckgo', publishedDate: null }
         ],
         images: [], videos: [], news: [], documents: [], books: []
     })
@@ -30,6 +30,10 @@ jest.mock('./engines/reddit', () => ({
 
 jest.mock('./engines/arxiv', () => ({
     search: jest.fn().mockResolvedValue({ academic: [] })
+}));
+
+jest.mock('./engines/osint', () => ({
+    search: jest.fn().mockResolvedValue({ osint: [] })
 }));
 
 

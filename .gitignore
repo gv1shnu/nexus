@@ -3,3 +3,7 @@ dist/
 *.log
 *.env
 package-lock.json
+metrics.jsonl
+venv/
+.venv/
+__pycache__/
