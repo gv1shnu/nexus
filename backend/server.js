@@ -1,17 +1,31 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs'); // Changed from fs.promises
+const fs = require('fs');
 const path = require('path');
+const { TTLCache } = require('./util/cache');
+const { assertPublicUrl } = require('./util/ssrf');
+const { resolvePython } = require('./util/python');
+const { rankResults, filterRelevant } = require('./util/ranking');
+const metrics = require('./util/metrics');
 
-// --- Simple File Logger ---
+// Text-bearing tabs get the "must contain a query term" relevance filter. Visual
+// browse tabs (images/videos/books) are left unfiltered — their metadata is thin.
+const TEXT_TABS = new Set(['web', 'news', 'documents', 'academic', 'code', 'community', 'reference', 'osint']);
+
+// --- Non-blocking File Logger ---
+// A shared append stream keeps logging off the synchronous I/O path so it no
+// longer blocks the event loop on every request.
 const LOG_FILE = path.join(__dirname, 'nexus.log');
+const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+// Strip newlines from interpolated values to prevent log-injection/forging.
+function sanitize(msg) {
+  return String(msg).replace(/[\r\n]+/g, ' ');
+}
 function logInfo(msg) {
-  const line = `[${new Date().toISOString()}] INFO: ${msg}\n`;
-  fs.appendFileSync(LOG_FILE, line);
+  logStream.write(`[${new Date().toISOString()}] INFO: ${sanitize(msg)}\n`);
 }
 function logErrorLevel(msg) {
-  const line = `[${new Date().toISOString()}] ERROR: ${msg}\n`;
-  fs.appendFileSync(LOG_FILE, line);
+  logStream.write(`[${new Date().toISOString()}] ERROR: ${sanitize(msg)}\n`);
 }
 
 // Import all engine modules
@@ -21,37 +35,18 @@ const stackexchange = require('./engines/stackexchange');
 const reddit = require('./engines/reddit');
 const arxiv = require('./engines/arxiv');
 const searxng = require('./engines/searxng');
+const osint = require('./engines/osint');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = 8000;
-const PAGE_SIZE = 10;
 const ERROR_LOG_FILE = 'error.log';
 
-const TRUSTED_DOMAINS = [
-  'wikipedia.org',
-  'stackoverflow.com',
-  'github.com',
-  'medium.com',
-  'arxiv.org',
-  'reddit.com'
-];
-
-const ENGINE_WEIGHTS = {
-  'wikipedia': 50,
-  'stackoverflow': 40,
-  'duckduckgo': 25,
-  'duckduckgo-instant': 30,
-  'duckduckgo-news': 20,
-  'duckduckgo-videos': 15,
-  'duckduckgo-images': 10,
-  'duckduckgo-dorks': 20,
-  'arxiv': 35,
-  'reddit': 15,
-  'cwe-mitre': 30
-};
+// Cache the merged (pre-rank) engine results per query so repeat searches skip
+// the whole upstream fan-out. Ranking/sort/pagination still run per request.
+const searchCache = new TTLCache({ ttlMs: 5 * 60 * 1000, maxEntries: 500 });
 
 async function logError(errorDetails) {
   const logEntry = {
@@ -68,85 +63,6 @@ async function logError(errorDetails) {
   }
 }
 
-function rankResults(results, query, sortBy = 'relevance') {
-  const seenUrls = new Set();
-  const lowerQuery = query.toLowerCase();
-  const now = Date.now();
-
-  const scored = results.map(item => {
-    let score = 0;
-    let domain = 'unknown';
-
-    try {
-      domain = new URL(item.url).hostname;
-    } catch { }
-
-    // Parse published date
-    let publishedDate = null;
-    if (item.publishedDate) {
-      const parsed = new Date(item.publishedDate);
-      if (!isNaN(parsed.getTime())) {
-        publishedDate = parsed.toISOString();
-
-        const ageMs = now - parsed.getTime();
-        const ageDays = ageMs / (1000 * 60 * 60 * 24);
-        if (ageDays <= 7) score += 60;
-        else if (ageDays <= 30) score += 30;
-        else if (ageDays <= 365) score += 10;
-      }
-    }
-
-    // Engine-specific weight (also match searxng-* engines)
-    const baseEngine = item.engine?.split('-')[0] || '';
-    score += ENGINE_WEIGHTS[item.engine] || ENGINE_WEIGHTS[baseEngine] || 5;
-
-    if (TRUSTED_DOMAINS.some(d => domain.includes(d))) score += 50;
-    score += Math.max(0, 30 - item.url.length / 8);
-    if (item.title?.toLowerCase().includes(lowerQuery)) score += 40;
-    if (item.title?.length < 60) score += 15;
-    if (domain.includes('stackoverflow.com')) score += 20;
-    if (domain.includes('github.com')) score += 20;
-
-    return { ...item, domain, score, publishedDate };
-  });
-
-  // Deduplicate
-  const unique = scored.filter(item => {
-    if (seenUrls.has(item.url)) return false;
-    seenUrls.add(item.url);
-    return true;
-  });
-
-  // Sort
-  if (sortBy === 'date') {
-    unique.sort((a, b) => {
-      if (a.publishedDate && b.publishedDate) return new Date(b.publishedDate) - new Date(a.publishedDate);
-      if (a.publishedDate) return -1;
-      if (b.publishedDate) return 1;
-      return b.score - a.score;
-    });
-  } else {
-    unique.sort((a, b) => b.score - a.score);
-  }
-
-  return unique;
-}
-
-function paginate(results, page) {
-  if (page < 1) page = 1;
-  const total = results.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (page > totalPages) page = totalPages;
-  const start = (page - 1) * PAGE_SIZE;
-
-  return {
-    total,
-    page,
-    totalPages,
-    cards: results.slice(start, start + PAGE_SIZE)
-  };
-}
-
 // All engines keyed by name
 const ENGINES = {
   ddg,
@@ -154,13 +70,15 @@ const ENGINES = {
   wikipedia,
   stackexchange,
   reddit,
-  arxiv
+  arxiv,
+  osint
 };
 
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   let page = parseInt(req.query.page) || 1;
-  const sortBy = req.query.sort === 'date' ? 'date' : 'relevance';
+  // Default to date-descending; only fall back to relevance when explicitly asked.
+  const sortBy = req.query.sort === 'relevance' ? 'relevance' : 'date';
 
   if (!query) {
     return res.status(400).json({ error: 'Missing query parameter' });
@@ -168,98 +86,161 @@ app.get('/api/search', async (req, res) => {
 
   logInfo(`Searching: "${query}" (sort=${sortBy}, page=${page})`); // Replaced console.log
 
-  // Fire all engines in parallel
-  const engineNames = Object.keys(ENGINES);
-  const promises = engineNames.map(name =>
-    ENGINES[name].search(query).catch(err => {
-      logErrorLevel(`${name} failed: ${err.message}`); // Replaced console.error
-      return {};
-    })
-  );
+  const totalTimer = metrics.timer();
+  const engineStats = [];
+  const cacheKey = query.trim().toLowerCase();
+  let merged = searchCache.get(cacheKey);
+  const cacheHit = !!merged;
 
-  const settled = await Promise.allSettled(promises);
+  if (cacheHit) {
+    logInfo(`Cache hit for "${query}"`);
+  } else {
+    // Fire all engines in parallel, timing each independently.
+    const engineNames = Object.keys(ENGINES);
+    const promises = engineNames.map(name => {
+      const engineTimer = metrics.timer();
+      return ENGINES[name].search(query)
+        .then(data => {
+          engineStats.push({ name, ms: +engineTimer().toFixed(1), ok: true, count: metrics.countResults(data) });
+          return data;
+        })
+        .catch(err => {
+          engineStats.push({ name, ms: +engineTimer().toFixed(1), ok: false, count: 0 });
+          logErrorLevel(`${name} failed: ${err.message}`); // Replaced console.error
+          return {};
+        });
+    });
 
-  // Merge all results by content type
-  const merged = {
-    web: [],
-    images: [],
-    videos: [],
-    news: [],
-    documents: [],
-    books: [],
-    code: [],
-    academic: [],
-    community: []
-  };
+    const settled = await Promise.allSettled(promises);
 
-  settled.forEach((result, i) => {
-    const data = result.status === 'fulfilled' ? result.value : {};
-    for (const type of Object.keys(merged)) {
-      if (Array.isArray(data[type])) {
-        merged[type].push(...data[type]);
+    // Merge all results by content type
+    merged = {
+      web: [],
+      images: [],
+      videos: [],
+      news: [],
+      documents: [],
+      books: [],
+      code: [],
+      academic: [],
+      community: [],
+      reference: [],
+      osint: [],
+      nsfw: []
+    };
+
+    settled.forEach((result, i) => {
+      const data = result.status === 'fulfilled' ? result.value : {};
+      for (const type of Object.keys(merged)) {
+        if (Array.isArray(data[type])) {
+          merged[type].push(...data[type]);
+        }
       }
-    }
-    const count = Object.values(data).flat().length;
-    if (count > 0) logInfo(`${engineNames[i]}: ${count} results`); // Replaced console.log
-  });
+      const count = Object.values(data).flat().length;
+      if (count > 0) logInfo(`${engineNames[i]}: ${count} results`); // Replaced console.log
+    });
 
-  // Rank web results
-  merged.web = rankResults(merged.web, query, sortBy);
+    searchCache.set(cacheKey, merged);
+  }
 
-  // Paginate web (primary tab)
-  const webPaginated = paginate(merged.web, page);
+  // Rank every category (not just web). Ranking returns fresh arrays, so the
+  // cached merged object stays untouched and can be re-ranked with a different
+  // sort on the next request. Track how much the filter and dedup remove.
+  const ranked = {};
+  let rawCount = 0;
+  let afterFilter = 0;
+  for (const type of Object.keys(merged)) {
+    rawCount += merged[type].length;
+    const items = TEXT_TABS.has(type) ? filterRelevant(merged[type], query) : merged[type];
+    afterFilter += items.length;
+    ranked[type] = rankResults(items, query, sortBy);
+  }
 
-  const totalResults = Object.values(merged).reduce((sum, arr) => sum + arr.length, 0);
+  const totalResults = Object.values(ranked).reduce((sum, arr) => sum + arr.length, 0);
   logInfo(`Total: ${totalResults} results across all types`); // Replaced console.log
 
+  metrics.record({
+    type: 'search',
+    endpoint: 'rest',
+    query,
+    sort: sortBy,
+    cacheHit,
+    engines: engineStats,
+    rawTotal: rawCount,
+    filteredOut: rawCount - afterFilter,      // off-topic (no query term)
+    dedupedOut: afterFilter - totalResults,   // duplicate URLs collapsed
+    finalTotal: totalResults,
+    totalMs: +totalTimer().toFixed(1)
+  });
+
+  // Return the full ranked web list (client paginates); other tabs as ranked arrays.
   res.json({
     query,
     sort: sortBy,
     totalResults,
-    web: webPaginated,
-    images: merged.images,
-    videos: merged.videos,
-    news: merged.news,
-    documents: merged.documents,
-    books: merged.books,
-    code: merged.code,
-    academic: merged.academic,
-    community: merged.community
+    web: { total: ranked.web.length, cards: ranked.web },
+    images: ranked.images,
+    videos: ranked.videos,
+    news: ranked.news,
+    documents: ranked.documents,
+    books: ranked.books,
+    code: ranked.code,
+    academic: ranked.academic,
+    community: ranked.community,
+    reference: ranked.reference,
+    osint: ranked.osint,
+    nsfw: ranked.nsfw
   });
 });
 
 // --- Dynamic Date Fallback Endpoint ---
-app.get('/api/resolve-date', (req, res) => {
+app.get('/api/resolve-date', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).json({ error: 'Missing url' });
 
-  // Use the virtual environment python specifically
-  const pythonExecutable = path.resolve(__dirname, '..', 'venv', 'Scripts', 'python.exe');
+  // SSRF guard: only fetch public http(s) hosts. Blocks loopback/private ranges
+  // and cloud metadata endpoints, including DNS-rebinding attempts.
+  const check = await assertPublicUrl(targetUrl);
+  if (!check.ok) {
+    logErrorLevel(`resolve-date blocked: ${check.reason} (${targetUrl})`);
+    return res.status(400).json({ error: `URL not allowed: ${check.reason}` });
+  }
+
+  // Cross-platform interpreter resolution (was hardcoded to a Windows venv path).
+  const pythonExecutable = resolvePython();
   const scriptPath = path.resolve(__dirname, 'engines', 'fallback_date.py');
 
   const { spawn } = require('child_process');
-  const pyProcess = spawn(pythonExecutable, [scriptPath, targetUrl]);
+  const pyProcess = spawn(pythonExecutable, [scriptPath, targetUrl], { timeout: 20000 });
 
   let output = '';
+  let responded = false;
+  const respond = (payload) => {
+    if (responded) return;
+    responded = true;
+    res.json(payload);
+  };
+
   pyProcess.stdout.on('data', (data) => output += data.toString());
+  pyProcess.on('error', () => respond({ url: targetUrl, publishedDate: null }));
 
   pyProcess.on('close', (code) => {
     try {
       if (code === 0 && output) {
-        const parsed = JSON.parse(output.trim());
-        res.json(parsed);
+        respond(JSON.parse(output.trim()));
       } else {
-        res.json({ url: targetUrl, publishedDate: null });
+        respond({ url: targetUrl, publishedDate: null });
       }
     } catch (e) {
-      res.json({ url: targetUrl, publishedDate: null });
+      respond({ url: targetUrl, publishedDate: null });
     }
   });
 });
 
 app.get('/api/search/stream', (req, res) => {
   const query = req.query.q;
-  const sortBy = req.query.sort === 'date' ? 'date' : 'relevance';
+  // Default to date-descending; only fall back to relevance when explicitly asked.
+  const sortBy = req.query.sort === 'relevance' ? 'relevance' : 'date';
 
   if (!query) {
     return res.status(400).json({ error: 'Missing query parameter' });
@@ -278,23 +259,47 @@ app.get('/api/search/stream', (req, res) => {
 
   logInfo(`Streaming Search: "${query}" (sort=${sortBy})`); // Replaced console.log
 
+  const totalTimer = metrics.timer();
+  const engineStats = [];
+  let rawTotal = 0;
+  let filteredTotal = 0;
+  let firstResultMs = null; // time until the user sees the first non-empty result
+
   const engineNames = Object.keys(ENGINES);
   let completed = 0;
 
   engineNames.forEach(name => {
+    const engineTimer = metrics.timer();
     ENGINES[name].search(query)
       .then(data => {
+        const rawCount = metrics.countResults(data);
+
+        // Drop off-topic results (no query term present) from text tabs before
+        // streaming, so date-sorted results aren't polluted by unrelated items.
+        const filtered = {};
+        for (const [type, items] of Object.entries(data)) {
+          filtered[type] = (Array.isArray(items) && TEXT_TABS.has(type))
+            ? filterRelevant(items, query)
+            : items;
+        }
+
+        const count = metrics.countResults(filtered);
+        rawTotal += rawCount;
+        filteredTotal += count;
+        if (firstResultMs === null && count > 0) firstResultMs = +totalTimer().toFixed(1);
+        engineStats.push({ name, ms: +engineTimer().toFixed(1), ok: true, count });
+
         // Send the payload for this specific engine
         res.write(`data: ${JSON.stringify({
           type: 'engine_result',
           engine: name,
-          data: data
+          data: filtered
         })}\n\n`);
 
-        const count = Object.values(data).flat().length;
         if (count > 0) logInfo(`Streamed ${name}: ${count} results`); // Replaced console.log
       })
       .catch(err => {
+        engineStats.push({ name, ms: +engineTimer().toFixed(1), ok: false, count: 0 });
         logErrorLevel(`Stream ${name} failed: ${err.message}`); // Replaced console.error
         res.write(`data: ${JSON.stringify({
           type: 'engine_error',
@@ -306,6 +311,20 @@ app.get('/api/search/stream', (req, res) => {
         completed++;
         if (completed === engineNames.length) {
           logInfo(`Streaming complete for "${query}"`); // Replaced console.log
+          metrics.record({
+            type: 'search',
+            endpoint: 'stream',
+            query,
+            sort: sortBy,
+            cacheHit: false,
+            engines: engineStats,
+            rawTotal,
+            filteredOut: rawTotal - filteredTotal, // off-topic (no query term)
+            dedupedOut: 0,                          // stream doesn't cross-engine dedup
+            finalTotal: filteredTotal,
+            firstResultMs,                          // time-to-first-result (perceived latency)
+            totalMs: +totalTimer().toFixed(1)
+          });
           res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
           res.end();
         }
@@ -316,6 +335,17 @@ app.get('/api/search/stream', (req, res) => {
     // Client closed the connection early
     completed = engineNames.length; // Ensure process doesn't try to write to closed connection
   });
+});
+
+// Aggregated usage/perf metrics (throughput, latency percentiles, cache hit
+// rate, noise-reduction) computed from metrics.jsonl.
+app.get('/api/stats', (req, res) => {
+  try {
+    res.json(metrics.summarize());
+  } catch (err) {
+    logErrorLevel(`stats failed: ${err.message}`);
+    res.status(500).json({ error: 'Failed to compute stats' });
+  }
 });
 
 app.post('/api/log-error', (req, res) => {

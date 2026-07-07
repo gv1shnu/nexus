@@ -1,9 +1,7 @@
-const { execFile } = require('child_process');
 const axios = require('axios');
-const path = require('path');
+const pyworker = require('../util/pyworker');
 
 const DDG_INSTANT_URL = 'https://api.duckduckgo.com/';
-const DDGS_SCRIPT = path.join(__dirname, 'ddg_search.py');
 const MAX_RESULTS = 30;
 
 // Source 1: DuckDuckGo Instant Answer API (structured knowledge)
@@ -56,24 +54,11 @@ async function instantAnswers(query) {
     return { web: results };
 }
 
-// Source 2: ddgs Python library (text, images, videos, news, documents)
+// Source 2: ddgs Python library via a persistent worker (text, images, videos,
+// news, documents). The worker stays warm between requests so we no longer pay
+// interpreter startup + import cost on every search.
 function ddgsSearch(query) {
-    return new Promise((resolve, reject) => {
-        execFile('python', [DDGS_SCRIPT, query, String(MAX_RESULTS)], {
-            timeout: 60000,
-            maxBuffer: 10 * 1024 * 1024
-        }, (err, stdout, stderr) => {
-            if (err) {
-                console.error('ddgs stderr:', stderr);
-                return reject(new Error(`ddgs failed: ${err.message}`));
-            }
-            try {
-                resolve(JSON.parse(stdout));
-            } catch (parseErr) {
-                reject(new Error(`ddgs JSON parse failed: ${parseErr.message}`));
-            }
-        });
-    });
+    return pyworker.search(query, MAX_RESULTS);
 }
 
 // Merge both sources
@@ -89,7 +74,8 @@ async function search(query) {
         videos: [],
         news: [],
         documents: [],
-        books: []
+        books: [],
+        nsfw: []
     };
 
     if (instant.status === 'fulfilled') {
@@ -104,6 +90,7 @@ async function search(query) {
         result.news.push(...(d.news || []));
         result.documents.push(...(d.documents || []));
         result.books.push(...(d.books || []));
+        result.nsfw.push(...(d.nsfw || []));
     }
 
     return result;

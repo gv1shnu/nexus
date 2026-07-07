@@ -126,10 +126,12 @@ tabsContainer.addEventListener("click", (e) => {
 function toggleSort() {
     currentSort = currentSort === "date" ? "relevance" : "date";
     document.getElementById("sortBtn").textContent = currentSort === "date" ? "Date" : "Relevance";
-    if (lastData) {
+    sessionStorage.setItem("currentSort", currentSort);
+    if (currentQuery) {
         currentPage = 1; // reset pagination on sort change
-        renderTab(lastData, currentTab);
-        updateURL();
+        // Re-run the search: relevance fetches the ranked REST endpoint, date
+        // re-streams. Results for each sort are cached separately (key includes sort).
+        search(1, true, currentQuery);
     }
 }
 
@@ -265,6 +267,14 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
         } catch { }
     }
 
+    // Relevance ranking (BM25 + Reciprocal Rank Fusion) needs the full corpus, so
+    // it can't be streamed incrementally — fetch the fully-ranked result set in one
+    // shot. Date sort keeps the live-streaming path below.
+    if (currentSort === "relevance") {
+        await runRankedSearch(q, cacheKey, shouldUpdateUrl);
+        return;
+    }
+
     try {
         // Initialize clean state for streaming
         lastData = {
@@ -276,7 +286,10 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
             books: [],
             code: [],
             academic: [],
-            community: []
+            community: [],
+            reference: [],
+            osint: [],
+            nsfw: []
         };
 
         tabsContainer.classList.remove("hidden");
@@ -361,6 +374,52 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
     }
 }
 
+// Blocking, fully-ranked search for relevance mode (BM25 + RRF, all tabs ranked
+// server-side). Unlike the streaming path, results arrive already ordered.
+async function runRankedSearch(q, cacheKey, shouldUpdateUrl) {
+    try {
+        const url = `http://localhost:8000/api/search?q=${encodeURIComponent(q)}&sort=relevance`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Server responded ${res.status}`);
+        const data = await res.json();
+
+        lastData = {
+            web: { cards: data.web?.cards || [], total: data.web?.total || 0 },
+            images: data.images || [],
+            videos: data.videos || [],
+            news: data.news || [],
+            documents: data.documents || [],
+            books: data.books || [],
+            code: data.code || [],
+            academic: data.academic || [],
+            community: data.community || [],
+            reference: data.reference || [],
+            osint: data.osint || [],
+            nsfw: data.nsfw || []
+        };
+
+        hideLoader();
+        tabsContainer.classList.remove("hidden");
+        document.getElementById("sortBtn").style.display = "inline-block";
+        document.getElementById("homeBtn").style.display = "inline-block";
+        updateTabCounts(lastData);
+        renderTab(lastData, currentTab);
+
+        try {
+            localStorage.setItem(cacheKey, JSON.stringify({
+                expiry: Date.now() + 3600000,
+                data: lastData
+            }));
+        } catch { }
+
+        if (shouldUpdateUrl) updateURL();
+    } catch (err) {
+        hideLoader();
+        statusDiv.innerHTML = `<div class="error"></div>`;
+        statusDiv.querySelector(".error").textContent = `Error: ${err.message}`;
+    }
+}
+
 function updateTabCounts(data) {
     let totalAll = 0;
 
@@ -401,7 +460,8 @@ function renderTab(data, tab) {
     // Gather items for paginated tabs
     let itemsToRender = [];
     if (tab === "all") {
-        ['web', 'news', 'documents', 'books', 'code', 'academic', 'community', 'osint', 'people'].forEach(t => {
+        // NSFW is intentionally excluded from the aggregated "All" view (opt-in only).
+        ['web', 'news', 'documents', 'books', 'code', 'academic', 'reference', 'community', 'osint'].forEach(t => {
             if (t === "web" && data.web?.cards) itemsToRender.push(...data.web.cards);
             else if (data[t]) itemsToRender.push(...data[t]);
         });
@@ -469,6 +529,17 @@ function renderTab(data, tab) {
 
     } else if (tab === "images") {
         renderImageResults(data.images || [], container);
+    } else if (tab === "nsfw") {
+        // Mixed: image results (SearXNG) as a grid + Reddit NSFW posts as link cards.
+        const items = data.nsfw || [];
+        const imgs = items.filter(x => x.image);
+        const posts = items.filter(x => !x.image);
+        if (!imgs.length && !posts.length) {
+            container.innerHTML = '<div class="status-msg">No results found.</div>';
+        } else {
+            if (imgs.length) renderImageResults(imgs, container);
+            if (posts.length) renderGenericResults(posts, container);
+        }
     } else if (tab === "videos") {
         renderVideoResults(data.videos || [], container);
     } else if (tab === "news") {
@@ -582,6 +653,8 @@ function renderGenericResults(items, container) {
 
         // Extra metadata
         const extras = [];
+        if (item.platform) extras.push(item.platform);
+        if (item.ports && item.ports.length) extras.push(`Ports: ${item.ports.join(", ")}`);
         if (item.subreddit) extras.push(item.subreddit);
         if (item.upvotes) extras.push(`Upvotes: ${item.upvotes}`);
         if (item.commentCount) extras.push(`Comments: ${item.commentCount}`);
@@ -602,11 +675,12 @@ function renderGenericResults(items, container) {
                 <div class="card-meta">
                     <span class="card-engine">${item.engine || "source"}</span>
                     ${extras.join(" · ")}
-                    ${dateStr}
+                    ${item.platform ? "" : dateStr}
                 </div>
             </div>
         `;
         container.appendChild(div);
-        if (!item.publishedDate) observeCard(div);
+        // Skip date resolution for OSINT entity results (no meaningful publish date).
+        if (!item.publishedDate && !item.platform) observeCard(div);
     });
 }

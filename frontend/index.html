@@ -33,14 +33,20 @@
         </div>
     </div>
 
+    <button id="homeBtn" class="home-icon" onclick="goHome()" title="Home" aria-label="Home" style="display: none;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 10.5 12 3l9 7.5" />
+            <path d="M5 10v10h14V10" />
+        </svg>
+    </button>
+
     <div class="container">
         <h1>Nexus</h1>
-        <p class="tagline">searches the searchers</p>
 
         <div class="search-bar">
             <input id="searchInput" placeholder="Search the internet..." />
             <button id="sortBtn" onclick="toggleSort()" style="display: none;">Date</button>
-            <button id="homeBtn" onclick="goHome()" style="display: none;">Home</button>
         </div>
 
         <div id="status"></div>
@@ -56,7 +62,10 @@
             <button class="tab" data-tab="books">Books</button>
             <button class="tab" data-tab="code">Code</button>
             <button class="tab" data-tab="academic">Academic</button>
+            <button class="tab" data-tab="reference">Wikipedia</button>
             <button class="tab" data-tab="community">Community</button>
+            <button class="tab" data-tab="osint">OSINT</button>
+            <button class="tab" data-tab="nsfw">NSFW</button>
         </div>
 
         <div id="results"></div>
@@ -64,6 +73,7 @@
 
         <footer>
             <p>the goal is more information, not speed.</p>
+            <p><a href="/stats.html" style="color: rgba(255,255,255,0.4); text-decoration: none; font-size: 0.8rem;">stats &rarr;</a></p>
         </footer>
     </div>
 

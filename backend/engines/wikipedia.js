@@ -2,20 +2,18 @@ const axios = require('axios');
 
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 
-async function search(query) {
-    let allItems = [];
-    let offset = 0;
-    let keepGoing = true;
-    let loops = 0;
+const PAGE_SIZE = 100;
+const MAX_PAGES = 2; // deeper pages return loosely-related noise; keep it tight
 
-    while (keepGoing && loops < 5) {
+async function search(query) {
+    const fetchPage = async (offset) => {
         try {
             const res = await axios.get(WIKI_API, {
                 params: {
                     action: 'query',
                     list: 'search',
                     srsearch: query,
-                    srlimit: 100, // max per page is 50/100 depending on wiki limits
+                    srlimit: PAGE_SIZE, // max per page is 50/100 depending on wiki limits
                     srprop: 'snippet|timestamp',
                     format: 'json',
                     origin: '*',
@@ -26,33 +24,32 @@ async function search(query) {
                     'User-Agent': 'Nexus/1.0 (metasearch engine)'
                 }
             });
-
-            const items = res.data.query?.search || [];
-            if (items.length === 0) {
-                keepGoing = false;
-            } else {
-                allItems.push(...items);
-                if (res.data.continue?.sroffset) {
-                    offset = res.data.continue.sroffset;
-                    loops++;
-                } else {
-                    keepGoing = false;
-                }
-            }
+            return res.data.query?.search || [];
         } catch (e) {
-            keepGoing = false;
+            return [];
         }
-    }
+    };
+
+    // Fetch fixed offsets in parallel instead of chasing continuation tokens serially.
+    const offsets = Array.from({ length: MAX_PAGES }, (_, i) => i * PAGE_SIZE);
+    const pages = await Promise.all(offsets.map(fetchPage));
+    const allItems = pages.flat();
 
     const results = allItems.map(item => ({
         title: item.title,
         url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
         content: item.snippet.replace(/<[^>]*>/g, ''),
         engine: 'wikipedia',
-        publishedDate: item.timestamp || null
+        // NOTE: the search API's `timestamp` is the article's LAST-EDIT time, not a
+        // publish date. Using it made constantly-edited encyclopedia pages look
+        // "freshly published" and dominate the date sort, so we omit it — Wikipedia
+        // articles are timeless references and rank by relevance instead.
+        publishedDate: null
     }));
 
-    return { academic: results };
+    // Wikipedia is an encyclopedia/reference source, distinct from research
+    // papers (arXiv), so it gets its own category rather than "academic".
+    return { reference: results };
 }
 
 module.exports = { search };
