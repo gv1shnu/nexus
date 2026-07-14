@@ -4,7 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "test:integration": "jest engines.test.js --testPathIgnorePatterns /node_modules/"
+  },
+  "jest": {
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "engines.test.js"
+    ]
   },
   "keywords": [],
   "author": "",
