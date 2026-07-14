@@ -25,9 +25,9 @@ describe('Engine Integration Tests', () => {
 
     test('Wikipedia returns results', async () => {
         const data = await wikipedia.search(QUERY);
-        const count = (data.academic || []).length;
+        const count = (data.reference || []).length;
 
-        console.log(`  Wikipedia: ${count} academic results`);
+        console.log(`  Wikipedia: ${count} reference results`);
 
         expect(count).toBeGreaterThan(0);
     }, 15000);
