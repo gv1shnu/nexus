@@ -1,0 +1,41 @@
+#
+# Two services:
+#   nexus    - Node backend + Python worker, also serves the static frontend
+#   searxng  - SearXNG aggregator (powers the Web/Images/NSFW sources)
+#
+# Tier 1 (skip SearXNG): comment out the `searxng` service AND the SEARXNG_URL
+# env var below. Nexus still runs; only the SearXNG-fed sources go quiet.
+services:
+  - type: web
+    name: nexus
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      # Internal address of the SearXNG service (host:port). searxng.js upgrades
+      # a scheme-less value to http:// automatically.
+      - key: SEARXNG_URL
+        fromService:
+          name: searxng
+          type: web
+          property: hostport
+      # Optional: only needed if pinging SearXNG's INTERNAL address doesn't wake
+      # it from sleep. Set this to SearXNG's PUBLIC https://searxng-XXXX.onrender.com
+      # URL (known after first deploy) so the warm-up ping goes through Render's
+      # router, which reliably triggers spin-up. sync: false = set in dashboard.
+      - key: SEARXNG_WARM_URL
+        sync: false
+
+  - type: web
+    name: searxng
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/searxng/Dockerfile
+    dockerContext: ./backend/searxng
+    autoDeploy: true
+    envVars:
+      # Random secret injected into settings.yml's `ultrasecretkey` placeholder.
+      - key: SEARXNG_SECRET
+        generateValue: true

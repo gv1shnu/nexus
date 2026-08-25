@@ -1,42 +1,45 @@
 # Nexus
 
-**A metasearch engine — quantity over speed.**
-No API keys required. No tracking. One query, fanned out across many sources, merged and ranked.
+**A metasearch engine that goes wide.** No API keys, no tracking. You type one query,
+it fans out to a bunch of sources at once, then merges and ranks everything into a single feed.
 
-Nexus queries DuckDuckGo, a self-hosted SearXNG instance, Wikipedia, StackOverflow, Reddit,
-and arXiv in parallel — plus an OSINT module for entity lookups — then fuses everything into a
-single ranked feed with tabs for web, images, videos, news, docs, books, code, academic,
-Wikipedia, community, OSINT, and NSFW results.
+The idea is quantity over raw speed: instead of trusting one engine, Nexus asks DuckDuckGo,
+a self-hosted SearXNG instance, Wikipedia, StackOverflow, Reddit, and arXiv all at the same
+time — plus a small OSINT module for looking up usernames and domains — and stitches the
+results together. You get tabs for web, images, videos, news, docs, books, code, academic,
+Wikipedia, community, OSINT, and NSFW.
 
 ---
 
 ## Sources & tabs
 
-| Source | Protocol | Feeds tab(s) |
-|--------|----------|--------------|
-| **SearXNG** (self-hosted) | aggregator (Docker) | Web · Images · NSFW |
+| Source | How it's queried | Feeds |
+|--------|------------------|-------|
+| **SearXNG** (self-hosted) | aggregator over Docker | Web · Images · NSFW |
 | **DuckDuckGo** (`ddgs` worker + Instant Answer) | Python lib / REST | Web · Videos · News · Books · Docs |
 | **Wikipedia** | REST/JSON | Wikipedia |
 | **arXiv** | Atom/XML | Academic |
 | **StackOverflow** (StackExchange) | REST/JSON | Code |
 | **Reddit** (old.reddit scrape) | HTML scrape | Community · NSFW |
-| **OSINT** (Sherlock / theHarvester / Shodan style) | HTTP / crt.sh / Shodan API | OSINT |
+| **OSINT** (username + domain lookups) | HTTP / crt.sh | OSINT |
 
-- **Images / NSFW** are sourced from SearXNG (Bing/Google/Flickr/Pinterest/…), which is far more
-  reliable than DuckDuckGo's frequently-403'd image endpoint. NSFW = image search with safesearch
-  **off**; Reddit NSFW posts (safesearch-off scrape) are surfaced as link cards in the same tab.
-- **OSINT** only runs when the query looks like a single entity — a **username** (presence check
-  across ~15 platforms, Sherlock-style), a **domain** (subdomain discovery via certificate
-  transparency / crt.sh, theHarvester-style), or an **IP** (Shodan host lookup, needs `SHODAN_API_KEY`).
+A couple of things worth knowing:
+
+- **Images and NSFW come from SearXNG** (Bing/Google/Flickr/Pinterest/…), not DuckDuckGo —
+  DDG's image endpoint gets 403'd constantly, so it's not worth relying on. NSFW is just image
+  search with safesearch off, plus safesearch-off Reddit posts shown as link cards in the same tab.
+- **OSINT only kicks in when your query looks like a single thing**, not a phrase — a **username**
+  (checks ~15 platforms for that handle, Sherlock-style) or a **domain** (finds subdomains from
+  certificate-transparency logs via crt.sh, theHarvester-style).
 
 ---
 
-## Architecture
+## How it fits together
 
 ```
                          ┌──────────────────────────────┐
-  Browser (SPA)  ─────▶  │  Express backend (port 8000) │
-  frontend/index.js      │                              │
+  Browser                │  Express backend (port 8000) │
+  (frontend/index.js)    │                              │
       │  ▲               │  /api/search        (ranked) │
       │  │ SSE / fetch   │  /api/search/stream (live)   │
       │  │               │  /api/resolve-date  (SSRF-   │
@@ -50,115 +53,118 @@ Wikipedia, community, OSINT, and NSFW results.
               worker)                          (REST)
 ```
 
-### How results are ranked
+The backend also serves the static frontend, so the whole thing runs as one process.
 
-Two complementary signals, each normalized to `[0,1]` so neither dominates by scale, plus light
-priors — see [`backend/util/ranking.js`](backend/util/ranking.js):
+### How results get ranked
 
-- **BM25** ([`util/bm25.js`](backend/util/bm25.js)) — Okapi BM25 text relevance over each result's
-  title + content (term-frequency saturation, IDF, document-length normalization). Word order and
-  body text both count.
-- **Reciprocal Rank Fusion (RRF)** — `score = Σ 1/(60 + rank)` across engines. A URL surfaced near
-  the top by *multiple* independent engines is boosted; contributions are summed across engines
-  before de-duplication.
-- **Priors** — small nudges for source trust and recency to break ties.
+Ranking blends two signals, each squashed to `[0,1]` so neither one wins just by having a
+bigger scale, with a few small tie-breakers on top — the details live in
+[`backend/util/ranking.js`](backend/util/ranking.js):
 
-A **relevance filter** additionally drops results whose title/content contains **none** of the
-query terms, so text tabs aren't polluted by loosely-related upstream matches.
+- **BM25** ([`util/bm25.js`](backend/util/bm25.js)) — classic Okapi BM25 over each result's title
+  and content, so term frequency, rarity, and document length all factor in.
+- **Reciprocal Rank Fusion** — `score = Σ 1/(60 + rank)` across engines. If several engines
+  independently surface the same URL near the top, it gets a boost.
+- **Priors** — gentle nudges for source trust and recency to settle ties.
 
-### Two search paths
+There's also a relevance filter that throws out results whose title and content contain *none*
+of your query terms, so the text tabs don't fill up with loosely-related junk.
 
-| Sort mode          | Endpoint                     | Why                                                           |
-|--------------------|------------------------------|---------------------------------------------------------------|
-| **Date** (default) | `/api/search/stream` (SSE)   | Results stream in live, newest-first. Great perceived speed.  |
-| **Relevance**      | `/api/search` (blocking)     | BM25 + RRF need the *whole* corpus, so they can't be streamed. |
+### Two ways to search
 
-### Notable engineering
+| Sort mode | Endpoint | Why it works this way |
+|-----------|----------|------------------------|
+| **Date** (default) | `/api/search/stream` (SSE) | Results stream in live, newest first, so it feels fast. |
+| **Relevance** | `/api/search` (blocking) | BM25 + RRF need the whole result set at once, so there's nothing to stream. |
 
-- **Persistent Python worker** ([`engines/ddg_worker.py`](backend/engines/ddg_worker.py) +
-  [`util/pyworker.js`](backend/util/pyworker.js)) — the `ddgs` interpreter stays warm and services
-  requests over a thread pool, instead of cold-starting Python per search.
-- **Metrics** ([`util/metrics.js`](backend/util/metrics.js)) — every search records per-engine
-  latency, result counts, cache hits, and filter/dedup ratios to `metrics.jsonl`. Aggregated at
-  `/api/stats`, the [`/stats`](frontend/stats.html) dashboard, and `node backend/stats.js`.
-- **SSRF guard** ([`util/ssrf.js`](backend/util/ssrf.js)) — `/api/resolve-date` only fetches public
-  `http(s)` hosts; loopback, private ranges, and cloud-metadata IPs are blocked, including
-  DNS-rebinding attempts.
-- **In-memory TTL cache** ([`util/cache.js`](backend/util/cache.js)) — repeat queries skip the
-  upstream fan-out.
-- **Parallel pagination** — Wikipedia / arXiv / StackOverflow pages are fetched concurrently.
-- **Cross-platform Python resolution** ([`util/python.js`](backend/util/python.js)) — finds a
-  project venv or a system `python3` on any OS.
+### Bits I'm happy with
+
+- **A Python worker that stays warm** ([`engines/ddg_worker.py`](backend/engines/ddg_worker.py) +
+  [`util/pyworker.js`](backend/util/pyworker.js)) — the `ddgs` interpreter is kept alive and
+  handled over a thread pool, instead of paying Python's startup cost on every single search.
+- **Metrics** ([`util/metrics.js`](backend/util/metrics.js)) — each search logs per-engine latency,
+  result counts, cache hits, and how much the filter/dedup step trimmed, to `metrics.jsonl`.
+  You can see it all at `/api/stats`, the [`/stats`](frontend/stats.html) dashboard, or
+  `node backend/stats.js`.
+- **An SSRF guard** ([`util/ssrf.js`](backend/util/ssrf.js)) — `/api/resolve-date` will only fetch
+  public `http(s)` hosts. Loopback, private ranges, and cloud-metadata IPs are blocked, and it
+  re-checks after DNS resolution so a rebinding trick can't sneak through.
+- **A small TTL cache** ([`util/cache.js`](backend/util/cache.js)) so repeated queries skip the
+  whole fan-out.
+- **Parallel pagination** — Wikipedia / arXiv / StackOverflow pages are fetched side by side.
+- **Python that resolves anywhere** ([`util/python.js`](backend/util/python.js)) — it finds a
+  project venv or a system `python3`, whatever OS you're on.
 
 ---
 
-## Requirements
+## What you need
 
 - **Node.js** 18+
 - **Python** 3.10+ (for the DuckDuckGo `ddgs` worker and date extraction)
-- **Docker** (for SearXNG — powers the Web, Images, and NSFW tabs)
+- **Docker** (optional — only if you want SearXNG, which powers the Web, Images, and NSFW tabs)
 
-## Setup
+## Getting set up
 
 ```bash
 git clone https://github.com/gv1shnu/nexus.git && cd nexus
 
-# Node dependencies
+# Node deps
 npm install
 
-# Python dependencies (virtualenv is auto-detected by the backend)
+# Python deps (the backend auto-detects this venv)
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# SearXNG (powers Web / Images / NSFW; runs with restart: unless-stopped)
+# Optional: SearXNG for the Web / Images / NSFW tabs
 cd backend && docker compose up -d && cd ..
 ```
 
-## Run
+## Running it
+
+The backend serves the frontend too, so it's a single command:
 
 ```bash
-# Terminal 1 — backend API (port 8000)
-cd backend && node server.js
+# With SearXNG running:
+SEARXNG_URL=http://localhost:8080 node backend/server.js
 
-# Terminal 2 — frontend (static, port 3000)
-cd frontend && npx serve . -l 3000
+# Or without it — SearXNG-fed tabs just stay empty:
+node backend/server.js
 ```
 
-Then open <http://localhost:3000> (and <http://localhost:3000/stats.html> for the metrics dashboard).
+Then open <http://localhost:8000> (and <http://localhost:8000/stats.html> for the metrics dashboard).
 
-> Engines fail independently: if Python, Docker, or a given upstream is unavailable, that engine
-> is skipped and the rest still return results.
+> Engines fail on their own. If Python, Docker, or some upstream is down, that one gets skipped
+> and everything else still comes back.
 
 ### Environment variables
 
-| Variable          | Default  | Purpose                                        |
-|-------------------|----------|------------------------------------------------|
-| `PORT`            | `8000`   | Backend listen port                            |
-| `NEXUS_PYTHON`    | auto     | Override the Python interpreter path           |
-| `NEXUS_DEBUG`     | unset    | Surface the Python worker's stderr logging     |
-| `SHODAN_API_KEY`  | unset    | Enables Shodan host lookups in the OSINT module |
+| Variable | Default | What it does |
+|----------|---------|--------------|
+| `PORT` | `8000` | Port the backend listens on |
+| `SEARXNG_URL` | unset | SearXNG base URL (e.g. `http://localhost:8080`). Unset = SearXNG off |
+| `NEXUS_PYTHON` | auto | Point at a specific Python interpreter |
+| `NEXUS_DEBUG` | unset | Surface the Python worker's stderr in the logs |
 
 ---
 
-## Test
+## Tests
 
 ```bash
-npm test                 # all Jest suites
-npx jest ranking.test.js # ranking (BM25 + RRF + filter) unit tests only
-node backend/stats.js    # print aggregated usage/perf stats from metrics.jsonl
+npm test                 # everything
+npx jest ranking.test.js # just the ranking (BM25 + RRF + filter) tests
+node backend/stats.js    # print aggregated stats from metrics.jsonl
 ```
 
-- [`backend/ranking.test.js`](backend/ranking.test.js) — deterministic BM25 + RRF + filter unit tests
-- [`backend/server.test.js`](backend/server.test.js) — API tests with mocked engines
-- [`backend/engines.test.js`](backend/engines.test.js) — live integration tests (need network)
+- [`backend/ranking.test.js`](backend/ranking.test.js) — deterministic ranking + filter tests
+- [`backend/server.test.js`](backend/server.test.js) — API tests with the engines mocked out
+- [`backend/engines.test.js`](backend/engines.test.js) — live integration tests (these hit the network)
 
 ---
 
-## Roadmap
+## Where it's headed
 
-- **OSINT depth** — reduce username false positives with per-site fingerprints; add Holehe (emails)
-  and an entity-correlation graph (Neo4j)
-- **Redis** cache + a proper search index (OpenSearch / Meilisearch)
-- **Rank tuning** — learned weights for the BM25 / RRF blend
-```
+- **Deeper OSINT** — cut username false positives with per-site fingerprints, and add email lookups
+  (Holehe) plus an entity-correlation graph (Neo4j)
+- **Redis** for caching, and a real search index (OpenSearch / Meilisearch)
+- **Rank tuning** — learn the weights on the BM25 / RRF blend instead of hand-picking them
