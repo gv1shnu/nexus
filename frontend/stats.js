@@ -1,4 +1,4 @@
-const API = "http://localhost:8000/api/stats";
+const API = "/api/stats";
 const content = document.getElementById("content");
 
 const pct = n => `${(n * 100).toFixed(1)}%`;

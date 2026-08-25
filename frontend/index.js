@@ -20,7 +20,7 @@ const dateObserver = new IntersectionObserver((entries, observer) => {
                 const url = dateSpan.dataset.url;
                 dateSpan.innerHTML = "<i>resolving...</i>";
 
-                fetch(`http://localhost:8000/api/resolve-date?url=${encodeURIComponent(url)}`)
+                fetch(`/api/resolve-date?url=${encodeURIComponent(url)}`)
                     .then(r => r.json())
                     .then(data => {
                         if (data.publishedDate) {
@@ -98,6 +98,11 @@ window.addEventListener("popstate", (e) => {
     }
 });
 
+
+// Wake SearXNG as soon as the page loads — it sleeps independently of the app on
+// free hosting, so this gives it a head start (~cold start) before the first
+// search. Fire-and-forget; ignored when SearXNG isn't configured.
+fetch("/api/warm").catch(() => {});
 
 input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") search();
@@ -297,7 +302,7 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
         renderTab(lastData, currentTab);
 
         try {
-            const url = `http://localhost:8000/api/search/stream?q=${encodeURIComponent(q)}&page=${currentPage}&sort=${currentSort}`;
+            const url = `/api/search/stream?q=${encodeURIComponent(q)}&page=${currentPage}&sort=${currentSort}`;
             const source = new EventSource(url);
 
             source.onmessage = (event) => {
@@ -378,7 +383,7 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
 // server-side). Unlike the streaming path, results arrive already ordered.
 async function runRankedSearch(q, cacheKey, shouldUpdateUrl) {
     try {
-        const url = `http://localhost:8000/api/search?q=${encodeURIComponent(q)}&sort=relevance`;
+        const url = `/api/search?q=${encodeURIComponent(q)}&sort=relevance`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Server responded ${res.status}`);
         const data = await res.json();

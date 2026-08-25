@@ -41,6 +41,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve the static frontend from the same origin as the API. This collapses
+// Nexus into a single deployable unit (one Render service), so the browser can
+// use relative /api/* URLs — no CORS, no hard-coded backend host.
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
+
+// Kick a wake-up ping at the (independently sleeping) SearXNG service. Returns
+// immediately — the ping runs in the background so SearXNG spins up while the
+// user is still on the page, before their first search fans out. The frontend
+// calls this on page load; harmless no-op when SearXNG isn't configured.
+app.get('/api/warm', (req, res) => {
+  searxng.warm().catch(() => {});
+  res.json({ ok: true });
+});
+
 const PORT = 8000;
 const ERROR_LOG_FILE = 'error.log';
 
@@ -366,6 +380,9 @@ if (require.main === module) {
   app.listen(PORT, () => {
     logInfo(`Nexus backend running on port ${PORT}`); // Replaced console.log
     logInfo(`Engines loaded: ${Object.keys(ENGINES).join(', ')}`); // Replaced console.log
+    // On a cold start (e.g. Render free-tier wake), wake SearXNG in parallel so
+    // it's ready by the time the user runs their first search.
+    searxng.warm().then(ok => logInfo(`SearXNG warm-up: ${ok ? 'ready' : 'not reached'}`)).catch(() => {});
   });
 }
 

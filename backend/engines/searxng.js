@@ -2,7 +2,17 @@ const axios = require('axios');
 const { readFileSync } = require('fs');
 const path = require('path');
 
-const SEARXNG_URL = 'http://localhost:8080/search';
+// Base origin of the SearXNG instance, e.g. http://localhost:8080 (local Docker)
+// or the internal address of the Render SearXNG service. When unset, the engine
+// is disabled and simply contributes no results (Nexus still runs). A bare
+// host:port (as Render's service linking provides) is upgraded to http://.
+function resolveSearxBase() {
+    let base = (process.env.SEARXNG_URL || '').trim().replace(/\/+$/, '');
+    if (base && !/^https?:\/\//i.test(base)) base = `http://${base}`;
+    return base;
+}
+const SEARXNG_BASE = resolveSearxBase();
+const SEARXNG_URL = SEARXNG_BASE ? `${SEARXNG_BASE}/search` : '';
 const ENGINES_FILE = path.join(__dirname, '..', 'searxng', 'enabled.txt');
 
 function getEngines() {
@@ -61,6 +71,10 @@ function dedupeByUrl(items) {
 }
 
 async function search(query) {
+    // Disabled when SEARXNG_URL is not configured — return empty immediately so
+    // we don't burn four 20s timeouts per query against a non-existent instance.
+    if (!SEARXNG_URL) return { web: [], images: [], nsfw: [] };
+
     // Web (general, 2 pages via the enabled engine list) + image search. SearXNG is
     // a robust image source (Bing/Google/Flickr/Pinterest) — unlike DuckDuckGo's
     // image endpoint, which is frequently 403-blocked. NSFW = same image search with
@@ -79,4 +93,26 @@ async function search(query) {
     return { web, images, nsfw };
 }
 
-module.exports = { search };
+// Wake a sleeping SearXNG service (Render free tier spins services down after
+// ~15 min idle, independently of the main app) so it's ready before the first
+// real search. Fire-and-forget: retries through a cold start, any HTTP response
+// counts as "awake". Set SEARXNG_WARM_URL to SearXNG's PUBLIC .onrender.com URL
+// if pinging the internal address doesn't trigger spin-up.
+async function warm({ attempts = 8, gapMs = 7000 } = {}) {
+    if (!SEARXNG_BASE) return false;
+    const target = (process.env.SEARXNG_WARM_URL || SEARXNG_BASE).trim().replace(/\/+$/, '');
+    for (let i = 0; i < attempts; i++) {
+        try {
+            // /healthz is SearXNG's health endpoint; validateStatus:true means
+            // even a 403/404 resolves — a response at all means it's up.
+            await axios.get(`${target}/healthz`, { timeout: 8000, validateStatus: () => true });
+            return true;
+        } catch {
+            // Connection refused / timeout => still spinning up. Wait and retry.
+            if (i < attempts - 1) await new Promise(r => setTimeout(r, gapMs));
+        }
+    }
+    return false;
+}
+
+module.exports = { search, warm };

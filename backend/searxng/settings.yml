@@ -1,7 +1,9 @@
 use_default_settings: true
 
 server:
-  secret_key: "dev_secret_key_change_me"
+  # Placeholder replaced at container start by the SEARXNG_SECRET env var
+  # (see the official image entrypoint). Locally it stays as-is, which is fine.
+  secret_key: "ultrasecretkey"
   limiter: false
 
 search:
