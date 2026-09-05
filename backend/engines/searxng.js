@@ -73,13 +73,13 @@ function dedupeByUrl(items) {
 async function search(query) {
     // Disabled when SEARXNG_URL is not configured — return empty immediately so
     // we don't burn four 20s timeouts per query against a non-existent instance.
-    if (!SEARXNG_URL) return { web: [], images: [], nsfw: [] };
+    if (!SEARXNG_URL) return { web: [], images: [], other: [] };
 
     // Web (general, 2 pages via the enabled engine list) + image search. SearXNG is
     // a robust image source (Bing/Google/Flickr/Pinterest) — unlike DuckDuckGo's
-    // image endpoint, which is frequently 403-blocked. NSFW = same image search with
-    // safesearch off.
-    const [web1, web2, imagesRaw, nsfwRaw] = await Promise.all([
+    // image endpoint, which is frequently 403-blocked. The "other" tab = same image
+    // search with safesearch off.
+    const [web1, web2, imagesRaw, otherRaw] = await Promise.all([
         fetchSearx(query, { category: 'general', page: 1 }),
         fetchSearx(query, { category: 'general', page: 2 }),
         fetchSearx(query, { category: 'images', safesearch: 1 }),
@@ -88,9 +88,9 @@ async function search(query) {
 
     const web = dedupeByUrl([...web1, ...web2].map(mapWeb));
     const images = dedupeByUrl(imagesRaw.map(mapImage('searxng-images')));
-    const nsfw = dedupeByUrl(nsfwRaw.map(mapImage('searxng-nsfw')));
+    const other = dedupeByUrl(otherRaw.map(mapImage('searxng-other')));
 
-    return { web, images, nsfw };
+    return { web, images, other };
 }
 
 // Wake a sleeping SearXNG service (Render free tier spins services down after

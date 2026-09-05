@@ -188,6 +188,31 @@ function favicon(url) {
     }
 }
 
+// Every result carries an `engine` slug (duckduckgo-news, searxng-images, arxiv,
+// reddit-other, …). Collapse it to a friendly provider name — "where this card
+// came from" — so every card, images included, shows a consistent source badge.
+const SOURCE_NAMES = {
+    duckduckgo: "DuckDuckGo",
+    searxng: "SearXNG",
+    wikipedia: "Wikipedia",
+    arxiv: "arXiv",
+    stackoverflow: "Stack Overflow",
+    reddit: "Reddit",
+    google: "Google",
+    osint: "OSINT",
+    sherlock: "Sherlock",
+    theharvester: "theHarvester",
+    shodan: "Shodan"
+};
+function sourceLabel(item) {
+    const engine = (item && item.engine) || "";
+    const base = engine.split("-")[0];
+    if (SOURCE_NAMES[base]) return SOURCE_NAMES[base];
+    if (SOURCE_NAMES[engine]) return SOURCE_NAMES[engine];
+    if (base) return base.charAt(0).toUpperCase() + base.slice(1);
+    return "Web";
+}
+
 function timeAgo(dateStr) {
     const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
     const intervals = [
@@ -294,7 +319,7 @@ async function search(page = 1, shouldUpdateUrl = true, forceQuery = null) {
             community: [],
             reference: [],
             osint: [],
-            nsfw: []
+            other: []
         };
 
         tabsContainer.classList.remove("hidden");
@@ -400,7 +425,7 @@ async function runRankedSearch(q, cacheKey, shouldUpdateUrl) {
             community: data.community || [],
             reference: data.reference || [],
             osint: data.osint || [],
-            nsfw: data.nsfw || []
+            other: data.other || []
         };
 
         hideLoader();
@@ -465,7 +490,7 @@ function renderTab(data, tab) {
     // Gather items for paginated tabs
     let itemsToRender = [];
     if (tab === "all") {
-        // NSFW is intentionally excluded from the aggregated "All" view (opt-in only).
+        // The "other" tab is intentionally excluded from the aggregated "All" view (opt-in only).
         ['web', 'news', 'documents', 'books', 'code', 'academic', 'reference', 'community', 'osint'].forEach(t => {
             if (t === "web" && data.web?.cards) itemsToRender.push(...data.web.cards);
             else if (data[t]) itemsToRender.push(...data[t]);
@@ -512,7 +537,7 @@ function renderTab(data, tab) {
                     <div class="card-url">${item.url}</div>
                     <div class="card-body">${item.content || item.body || ""}</div>
                     <div class="card-meta">
-                        <span class="card-engine">${item.engine || "web"}</span>
+                        <span class="card-engine">${sourceLabel(item)}</span>
                         ${dateStr}
                     </div>
                 </div>
@@ -534,9 +559,9 @@ function renderTab(data, tab) {
 
     } else if (tab === "images") {
         renderImageResults(data.images || [], container);
-    } else if (tab === "nsfw") {
-        // Mixed: image results (SearXNG) as a grid + Reddit NSFW posts as link cards.
-        const items = data.nsfw || [];
+    } else if (tab === "other") {
+        // Mixed: image results (SearXNG) as a grid + Reddit over-18 posts as link cards.
+        const items = data.other || [];
         const imgs = items.filter(x => x.image);
         const posts = items.filter(x => !x.image);
         if (!imgs.length && !posts.length) {
@@ -568,11 +593,17 @@ function renderImageResults(images, container) {
     images.forEach(img => {
         const div = document.createElement("div");
         div.className = "image-card";
+        const src = sourceLabel(img);
+        // SearXNG images also carry the underlying host engine (bing/flickr/…) in
+        // `source`; show it when it adds something beyond the provider name.
+        const host = img.source && img.source.toLowerCase() !== src.toLowerCase()
+            ? ` · ${img.source}` : "";
         div.innerHTML = `
             <a href="${img.url || img.image}" target="_blank">
                 <img src="${img.thumbnail || img.image}" alt="${img.title || ""}" loading="lazy" />
             </a>
             <div class="image-title">${img.title || ""}</div>
+            <div class="image-source">${src}${host}</div>
         `;
         grid.appendChild(div);
     });
@@ -602,7 +633,8 @@ function renderVideoResults(videos, container) {
                 <div class="card-body">${vid.description || ""}</div>
                 <div class="card-meta">
                     <img class="card-favicon" src="${icon}" alt="" onerror="this.style.display='none'" style="width: 12px; height: 12px; border-radius: 2px;" />
-                    <span class="card-engine">${vid.publisher || vid.engine || "video"}</span>
+                    <span class="card-engine">${sourceLabel(vid)}</span>
+                    ${vid.publisher ? `<span>${vid.publisher}</span>` : ""}
                     ${vid.duration ? `<span>${vid.duration}</span>` : ""}
                     ${dateStr}
                 </div>
@@ -633,7 +665,8 @@ function renderNewsResults(news, container) {
                 <div class="card-url">${item.url}</div>
                 <div class="card-body">${item.content || item.body || ""}</div>
                 <div class="card-meta">
-                    <span class="card-engine">${item.source || item.engine || "news"}</span>
+                    <span class="card-engine">${sourceLabel(item)}</span>
+                    ${item.source ? `<span>${item.source}</span>` : ""}
                     ${dateStr}
                 </div>
             </div>
@@ -678,7 +711,7 @@ function renderGenericResults(items, container) {
                 <div class="card-url">${item.url}</div>
                 <div class="card-body">${item.content || item.body || ""}</div>
                 <div class="card-meta">
-                    <span class="card-engine">${item.engine || "source"}</span>
+                    <span class="card-engine">${sourceLabel(item)}</span>
                     ${extras.join(" · ")}
                     ${item.platform ? "" : dateStr}
                 </div>

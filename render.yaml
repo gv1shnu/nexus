@@ -1,7 +1,7 @@
 #
 # Two services:
 #   nexus    - Node backend + Python worker, also serves the static frontend
-#   searxng  - SearXNG aggregator (powers the Web/Images/NSFW sources)
+#   searxng  - SearXNG aggregator (powers the Web/Images/Other sources)
 #
 # Tier 1 (skip SearXNG): comment out the `searxng` service AND the SEARXNG_URL
 # env var below. Nexus still runs; only the SearXNG-fed sources go quiet.
