@@ -156,10 +156,10 @@ def run_search(query, max_results):
         "news": [],
         "documents": [],
         "books": [],
-        "nsfw": [],
+        "other": [],
     }
 
-    # NOTE: images/nsfw are sourced from SearXNG, not DuckDuckGo — DDG's image
+    # NOTE: images/other are sourced from SearXNG, not DuckDuckGo — DDG's image
     # endpoint (i.js) is reliably 403-blocked. Videos use a different endpoint and
     # still work, so they stay here.
     output["web"] = _text(query, max_results)

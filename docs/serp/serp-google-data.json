@@ -1,0 +1,15 @@
+{
+  "source": "backend/engines/google.js scraper, query \"mercury\", captured 2026-09-02",
+  "note": "Real Google organic results via Nexus's own scraper. Google blocks automated SCREENSHOTS (reCAPTCHA), so serp-google.png is rendered from this data in a Google-style layout — see docs/serp/serp-compare.js and the render step.",
+  "query": "mercury",
+  "results": [
+    { "title": "Mercury", "url": "https://mercury.com/", "content": "Everything you do with money. All in one place. Apply in 10 minutes for business banking that transforms how you operate. checking and savings accounts" },
+    { "title": "Basic Information about Mercury | US EPA", "url": "https://www.epa.gov/mercury/basic-information-about-mercury", "content": "Mercury is a naturally-occurring chemical element found in rock in the earth's crust, including in deposits of coal." },
+    { "title": "Mercury (planet) - Wikipedia", "url": "https://en.wikipedia.org/wiki/Mercury_(planet)", "content": "Mercury is the first planet from the Sun and the smallest in the Solar System. It is a rocky planet with a trace atmosphere and a surface gravity slightly lower ..." },
+    { "title": "Worldwide Leader in Marine Propulsion | Mercury Marine | USA", "url": "https://www.mercurymarine.com/us/en", "content": "Mercury Marine is the world's leading manufacturer of recreational marine propulsion engines. Get sales, service and parts info, and find a local dealer ..." },
+    { "title": "Mercury (@mercury) / X", "url": "https://x.com/mercury", "content": "Mercury is the fintech more than 300K ambitious companies and entrepreneurs trust with their finances. saved ~33,214 hours with real-time payments." },
+    { "title": "Mercury (element) - Wikipedia", "url": "https://en.wikipedia.org/wiki/Mercury_(element)", "content": "Mercury is a chemical element; it has symbol Hg and atomic number 80. It is commonly known as quicksilver. A heavy, silvery d-block element, mercury is the only ..." },
+    { "title": "Mercury (@mercuryfi) - Facebook", "url": "https://www.facebook.com/mercuryfi/", "content": "Mercury is the fintech startups use for banking and all their financial workflows. Mercury is a fintech company, not an FDIC-insured bank." },
+    { "title": "Mercury | Banking for Startups", "url": "https://app.mercury.com/login", "content": "Enter your email address and password to log in and access your account. Mercury | Banking for Startups" }
+  ]
+}

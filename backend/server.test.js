@@ -36,6 +36,10 @@ jest.mock('./engines/osint', () => ({
     search: jest.fn().mockResolvedValue({ osint: [] })
 }));
 
+jest.mock('./engines/google', () => ({
+    search: jest.fn().mockResolvedValue({ web: [] })
+}));
+
 
 
 describe('Nexus Backend API', () => {

@@ -1,63 +1,17 @@
 const axios = require('axios');
+const { checkUsername } = require('../util/sherlock');
 
 // OSINT engine. Unlike keyword search, these are ENTITY lookups, so they only run
 // when the query looks like a single entity (username / domain / IP), not a phrase.
-//   • username  → Sherlock-style presence check across platforms
+//   • username  → real Sherlock: ~480-site presence check with per-site detection
+//                 rules (util/sherlock.js + the vendored Sherlock site database)
 //   • domain    → theHarvester-style subdomain discovery via certificate transparency (crt.sh)
 //   • IP/host   → Shodan host lookup (requires SHODAN_API_KEY)
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// Sites where a 404 reliably means "no such user". (Soft-404 sites are omitted to
-// keep false positives low — a lightweight stand-in for the full Sherlock list.)
-const USERNAME_SITES = [
-    { name: 'GitHub', url: u => `https://github.com/${u}` },
-    { name: 'GitLab', url: u => `https://gitlab.com/${u}` },
-    { name: 'Reddit', url: u => `https://www.reddit.com/user/${u}/about.json` },
-    { name: 'Instagram', url: u => `https://www.instagram.com/${u}/` },
-    { name: 'Twitch', url: u => `https://m.twitch.tv/${u}` },
-    { name: 'Telegram', url: u => `https://t.me/${u}` },
-    { name: 'Dev.to', url: u => `https://dev.to/${u}` },
-    { name: 'Medium', url: u => `https://medium.com/@${u}` },
-    { name: 'Hacker News', url: u => `https://news.ycombinator.com/user?id=${u}` },
-    { name: 'Keybase', url: u => `https://keybase.io/${u}` },
-    { name: 'PyPI', url: u => `https://pypi.org/user/${u}/` },
-    { name: 'Docker Hub', url: u => `https://hub.docker.com/u/${u}` },
-    { name: 'Steam', url: u => `https://steamcommunity.com/id/${u}` },
-    { name: 'Pastebin', url: u => `https://pastebin.com/u/${u}` },
-    { name: 'Replit', url: u => `https://replit.com/@${u}` },
-];
-
 const looksLikeIP = q => /^(\d{1,3}\.){3}\d{1,3}$/.test(q);
 const looksLikeDomain = q => /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/i.test(q) && /\.[a-z]{2,}$/i.test(q);
 const looksLikeUsername = q => /^[a-zA-Z0-9_.-]{2,30}$/.test(q);
-
-async function checkSite(site, username) {
-    const url = site.url(username);
-    try {
-        const res = await axios.get(url, {
-            timeout: 8000,
-            maxRedirects: 2,
-            validateStatus: () => true,
-            headers: { 'User-Agent': UA }
-        });
-        if (res.status >= 200 && res.status < 300) {
-            return {
-                title: `${site.name} — @${username}`,
-                url,
-                content: `Account found on ${site.name}.`,
-                engine: 'sherlock',
-                platform: site.name,
-                publishedDate: null
-            };
-        }
-    } catch { /* network error → treat as not found */ }
-    return null;
-}
-
-async function usernameLookup(username) {
-    const checks = await Promise.all(USERNAME_SITES.map(s => checkSite(s, username)));
-    return checks.filter(Boolean);
-}
 
 async function subdomainLookup(domain) {
     // Certificate transparency logs → subdomains (theHarvester's crt.sh source).
@@ -121,7 +75,7 @@ async function search(query) {
     } else if (looksLikeDomain(q)) {
         osint = await subdomainLookup(q);
     } else if (looksLikeUsername(q)) {
-        osint = await usernameLookup(q);
+        osint = await checkUsername(q);
     }
 
     return { osint };

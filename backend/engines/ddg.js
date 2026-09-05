@@ -75,7 +75,7 @@ async function search(query) {
         news: [],
         documents: [],
         books: [],
-        nsfw: []
+        other: []
     };
 
     if (instant.status === 'fulfilled') {
@@ -90,7 +90,7 @@ async function search(query) {
         result.news.push(...(d.news || []));
         result.documents.push(...(d.documents || []));
         result.books.push(...(d.books || []));
-        result.nsfw.push(...(d.nsfw || []));
+        result.other.push(...(d.other || []));
     }
 
     return result;

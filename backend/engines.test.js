@@ -4,6 +4,7 @@ const stackexchange = require('./engines/stackexchange');
 const reddit = require('./engines/reddit');
 const arxiv = require('./engines/arxiv');
 const searxng = require('./engines/searxng');
+const google = require('./engines/google');
 
 const QUERY = 'javascript';
 
@@ -67,5 +68,14 @@ describe('Engine Integration Tests', () => {
 
         expect(count).toBeGreaterThan(0);
     }, 25000);
+
+    test('Google returns results', async () => {
+        const data = await google.search(QUERY);
+        const count = (data.web || []).length;
+
+        console.log(`  Google: ${count} web results`);
+
+        expect(count).toBeGreaterThan(0);
+    }, 20000);
 
 });

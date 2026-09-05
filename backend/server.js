@@ -6,6 +6,7 @@ const { TTLCache } = require('./util/cache');
 const { assertPublicUrl } = require('./util/ssrf');
 const { resolvePython } = require('./util/python');
 const { rankResults, filterRelevant } = require('./util/ranking');
+const { classifyQuery } = require('./util/classifier');
 const metrics = require('./util/metrics');
 
 // Text-bearing tabs get the "must contain a query term" relevance filter. Visual
@@ -36,6 +37,7 @@ const reddit = require('./engines/reddit');
 const arxiv = require('./engines/arxiv');
 const searxng = require('./engines/searxng');
 const osint = require('./engines/osint');
+const google = require('./engines/google');
 
 const app = express();
 app.use(cors());
@@ -85,7 +87,8 @@ const ENGINES = {
   stackexchange,
   reddit,
   arxiv,
-  osint
+  osint,
+  google
 };
 
 app.get('/api/search', async (req, res) => {
@@ -100,17 +103,26 @@ app.get('/api/search', async (req, res) => {
 
   logInfo(`Searching: "${query}" (sort=${sortBy}, page=${page})`); // Replaced console.log
 
+  // Opt-in routing: with ?route=auto, only fan out to the engines the classifier
+  // deems suitable for this query. Default stays every engine — Nexus's "go wide".
+  const routeAuto = req.query.route === 'auto';
+  const classification = routeAuto ? classifyQuery(query) : null;
+  const engineNames = routeAuto
+    ? classification.runnable.filter(n => ENGINES[n])
+    : Object.keys(ENGINES);
+
   const totalTimer = metrics.timer();
   const engineStats = [];
-  const cacheKey = query.trim().toLowerCase();
+  // Cache per (query, routing): an auto-routed run fetches a different engine
+  // subset, so it must not share a cache entry with a full fan-out.
+  const cacheKey = query.trim().toLowerCase() + (routeAuto ? '|auto' : '');
   let merged = searchCache.get(cacheKey);
   const cacheHit = !!merged;
 
   if (cacheHit) {
     logInfo(`Cache hit for "${query}"`);
   } else {
-    // Fire all engines in parallel, timing each independently.
-    const engineNames = Object.keys(ENGINES);
+    // Fire the selected engines in parallel, timing each independently.
     const promises = engineNames.map(name => {
       const engineTimer = metrics.timer();
       return ENGINES[name].search(query)
@@ -140,7 +152,7 @@ app.get('/api/search', async (req, res) => {
       community: [],
       reference: [],
       osint: [],
-      nsfw: []
+      other: []
     };
 
     settled.forEach((result, i) => {
@@ -191,6 +203,7 @@ app.get('/api/search', async (req, res) => {
   res.json({
     query,
     sort: sortBy,
+    ...(classification ? { routing: classification } : {}),
     totalResults,
     web: { total: ranked.web.length, cards: ranked.web },
     images: ranked.images,
@@ -203,7 +216,7 @@ app.get('/api/search', async (req, res) => {
     community: ranked.community,
     reference: ranked.reference,
     osint: ranked.osint,
-    nsfw: ranked.nsfw
+    other: ranked.other
   });
 });
 
@@ -279,7 +292,15 @@ app.get('/api/search/stream', (req, res) => {
   let filteredTotal = 0;
   let firstResultMs = null; // time until the user sees the first non-empty result
 
-  const engineNames = Object.keys(ENGINES);
+  // Opt-in routing (see /api/search). Default fans out to every engine.
+  const routeAuto = req.query.route === 'auto';
+  const classification = routeAuto ? classifyQuery(query) : null;
+  const engineNames = routeAuto
+    ? classification.runnable.filter(n => ENGINES[n])
+    : Object.keys(ENGINES);
+  if (classification) {
+    res.write(`data: ${JSON.stringify({ type: 'routing', routing: classification })}\n\n`);
+  }
   let completed = 0;
 
   engineNames.forEach(name => {
@@ -349,6 +370,15 @@ app.get('/api/search/stream', (req, res) => {
     // Client closed the connection early
     completed = engineNames.length; // Ensure process doesn't try to write to closed connection
   });
+});
+
+// Deterministic query → engine routing. Returns the intent categories and the
+// engines Nexus would fan out to for `q` (see util/classifier). Read-only; handy
+// for debugging routing and for driving a ?route=auto search.
+app.get('/api/classify', (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.status(400).json({ error: 'Missing query parameter' });
+  res.json(classifyQuery(query));
 });
 
 // Aggregated usage/perf metrics (throughput, latency percentiles, cache hit
